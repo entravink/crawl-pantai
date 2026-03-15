@@ -1,6 +1,6 @@
 # Crawl Pantai
 
-This is an example code crawling Pantai
+This is an example code for crawling Pantai
 
 ## 🛠 Prerequisites
 
@@ -9,13 +9,13 @@ This is an example code crawling Pantai
 2.  **Environment Configuration** Create a file named `.env` in the root directory of this project. Copy the template below and fill in your specific credentials:
 
     ```env
-    DBHOST=localhost
+    DBHOST=
     DBUSER=
     DBPASS=
     DBPORT=
     DBNAME=
     TABLE_NAME=
-    SURVEY_PERIOD_ID=
+    SURVEY_PERIOD_ID=d63e9832-13c6-4ec7-bf5b-59229c2f90f9
     ```
     *Note: The `.env` file is ignored by Git to keep your credentials secure.*
 3.  **Iteration File** The iteration.txt file that contain region level. The provided file is an example for level 4 Pantai region.

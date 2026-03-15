@@ -49,7 +49,7 @@ SURVEY_PERIOD_ID=os.getenv("SURVEY_PERIOD_ID")
 # ==============================
 
 engine = create_engine(
-    f"mysql+pymysql://{DBUSER}:{DBPASS@{DBHOST}:{DBPORT}/{DBNAME}",
+    f"mysql+pymysql://{DBUSER}:{DBPASS}@{DBHOST}:{DBPORT}/{DBNAME}",
     pool_size=10,
     max_overflow=20,
     pool_recycle=3600

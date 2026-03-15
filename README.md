@@ -19,6 +19,14 @@ This is an example code for crawling Pantai
     ```
     *Note: The `.env` file is ignored by Git to keep your credentials secure.*
 3.  **Iteration File** The iteration.txt file that contain region level. The provided file is an example for level 4 Pantai region.
+4.  **Playwright & Dependencies:** Install the Python package and the necessary browser engines:
+    ```bash
+    # Install the library
+    pip install playwright
+
+    # Install the required browsers (Chromium, Firefox, etc.)
+    playwright install
+    ```
 
 ---
 

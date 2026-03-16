@@ -24,6 +24,7 @@ BASE_URL = "https://fasih-sm.bps.go.id/analytic/api/v2/assignment/datatable-all-
 LOGIN_URL = "https://fasih-sm.bps.go.id/"
 
 REGION_FILE = "iteration.txt"
+REGION_LIST_FILE = "region_list.csv"
 
 OUTPUT_CSV = "fasih_data.csv"
 COMPLETED_FILE = "completed_regions.txt"
@@ -348,6 +349,29 @@ def parse_iteration_file(filepath):
 
     return combos
 
+def load_or_create_region_list():
+
+    if os.path.exists(REGION_LIST_FILE):
+
+        print("Loading region list from CSV...")
+
+        df = pd.read_csv(REGION_LIST_FILE)
+
+        regions = df.to_dict(orient="records")
+
+        return regions
+
+    print("region_list.csv not found, parsing iteration file...")
+
+    regions = parse_iteration_file(REGION_FILE)
+
+    df = pd.DataFrame(regions)
+
+    df.to_csv(REGION_LIST_FILE,index=False)
+
+    print("Region list saved to region_list.csv")
+
+    return regions
 
 # ==============================
 # COMPLETED TRACKER
@@ -461,7 +485,7 @@ def main():
 
     print("Login berhasil")
 
-    regions = parse_iteration_file(REGION_FILE)
+    regions = load_or_create_region_list()
 
     total = len(regions)
 

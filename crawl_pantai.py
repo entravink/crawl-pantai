@@ -117,9 +117,35 @@ def convert_first_level(rows):
 
         for key,value in row.items():
 
-            if isinstance(value,(dict,list)):
+            # normalize nested region JSON
+            if key == "region" and isinstance(value, dict):
+
+                l1 = value.get("level1")
+                l2 = l1.get("level2") if isinstance(l1, dict) else None
+                l3 = l2.get("level3") if isinstance(l2, dict) else None
+                l4 = l3.get("level4") if isinstance(l3, dict) else None
+
+                new_row["level1_code"] = l1.get("code") if l1 else None
+                new_row["level1_name"] = l1.get("name") if l1 else None
+
+                new_row["level2_code"] = l2.get("code") if l2 else None
+                new_row["level2_name"] = l2.get("name") if l2 else None
+
+                new_row["level3_code"] = l3.get("code") if l3 else None
+                new_row["level3_name"] = l3.get("name") if l3 else None
+
+                new_row["level4_code"] = l4.get("code") if l4 else None
+                new_row["level4_name"] = l4.get("name") if l4 else None
+
+                # keep original region JSON
+                new_row["region"] = json.dumps(value,ensure_ascii=False)
+
+            elif isinstance(value,(dict,list)):
+
                 new_row[key] = json.dumps(value,ensure_ascii=False)
+
             else:
+
                 new_row[key] = value
 
         cleaned.append(new_row)

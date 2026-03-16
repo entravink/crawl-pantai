@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from login import login_with_sso
 from dotenv import load_dotenv
+from sqlalchemy import VARCHAR, DATETIME
 
 load_dotenv()
 
@@ -29,6 +30,8 @@ REGION_LIST_FILE = "region_list.csv"
 OUTPUT_CSV = "fasih_data.csv"
 COMPLETED_FILE = "completed_regions.txt"
 
+COOKIE_FILE = "fasih_cookie.json"
+
 PAGE_SIZE = 1000
 MAX_WORKERS = 8
 MAX_RETRIES = 5
@@ -43,6 +46,12 @@ DBPORT=os.getenv("DBPORT")
 DBNAME=os.getenv("DBNAME")
 TABLE_NAME=os.getenv("TABLE_NAME")
 SURVEY_PERIOD_ID=os.getenv("SURVEY_PERIOD_ID")
+
+COLUMN_TYPES = {
+    "id": VARCHAR(150),
+    "dateCreated": DATETIME(),
+    "dateModified": DATETIME()
+}
 
 
 # ==============================
@@ -186,7 +195,8 @@ def insert_to_db(df):
                 if_exists="append",
                 index=False,
                 chunksize=1000,
-                method="multi"
+                method="multi",
+                dtype=COLUMN_TYPES
             )
 
             return
@@ -218,6 +228,12 @@ def append_to_storage(rows):
 
             header_columns = list(df.columns)
 
+            if "dateCreated" in df.columns:
+                df["dateCreated"] = pd.to_datetime(df["dateCreated"], errors="coerce")
+
+            if "dateModified" in df.columns:
+                df["dateModified"] = pd.to_datetime(df["dateModified"], errors="coerce")
+
             df.to_csv(
                 OUTPUT_CSV,
                 index=False,
@@ -231,7 +247,8 @@ def append_to_storage(rows):
                 if_exists="replace",
                 index=False,
                 chunksize=1000,
-                method="multi"
+                method="multi",
+                dtype=COLUMN_TYPES
             )
 
             header_written = True
@@ -443,29 +460,32 @@ def scrape_region(region,index,total,headers):
         progress_count += 1
         print(f"Completed {progress_count}/{total}")
 
-
 # ==============================
-# MAIN
+# COOKIE CHECK
 # ==============================
 
-def main():
+def save_cookie(cookies):
 
-    global completed_regions
+    with open(COOKIE_FILE,"w",encoding="utf8") as f:
+        json.dump(cookies,f)
 
-    username = input("Username: ")
-    password = input("Password: ")
-    otp = input("OTP(optional): ").strip() or None
+    print("Cookie saved")
 
-    page,browser = login_with_sso(username,password,otp)
 
-    if not page:
-        print("Login gagal")
-        return
+def load_cookie():
 
-    page.goto(LOGIN_URL)
-    page.wait_for_load_state("networkidle")
+    if not os.path.exists(COOKIE_FILE):
+        return None
 
-    cookies = page.context.cookies()
+    with open(COOKIE_FILE,"r",encoding="utf8") as f:
+        cookies = json.load(f)
+
+    print("Cookie loaded")
+
+    return cookies
+
+
+def cookie_to_header(cookies):
 
     cookie_string = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
 
@@ -481,9 +501,81 @@ def main():
         "Referer":"https://fasih-sm.bps.go.id/"
     }
 
-    browser.close()
+    return headers
 
-    print("Login berhasil")
+
+def test_cookie(headers):
+
+    payload = copy.deepcopy(BASE_PAYLOAD)
+    payload["length"] = 1
+
+    try:
+
+        r = session.post(
+            BASE_URL,
+            json=payload,
+            headers=headers,
+            timeout=20
+        )
+
+        if r.status_code == 200:
+            print("Cookie still valid")
+            return True
+
+    except Exception:
+        pass
+
+    print("Cookie expired")
+
+    return False
+	
+# ==============================
+# MAIN
+# ==============================
+
+def main():
+
+    global completed_regions
+
+    cookies = load_cookie()
+
+    if cookies:
+
+        headers = cookie_to_header(cookies)
+
+        if not test_cookie(headers):
+            cookies = None
+
+    if not cookies:
+
+        username = input("Username: ")
+        password = input("Password: ")
+        otp = input("OTP(optional): ").strip() or None
+
+        page,browser = login_with_sso(username,password,otp)
+
+        if not page:
+            print("Login gagal")
+            return
+
+        page.goto(LOGIN_URL)
+        page.wait_for_load_state("networkidle")
+
+        cookies = page.context.cookies()
+
+        save_cookie(cookies)
+
+        browser.close()
+
+        headers = cookie_to_header(cookies)
+
+        print("Login berhasil")
+
+    else:
+
+        headers = cookie_to_header(cookies)
+
+        print("Using saved cookie")
 
     regions = load_or_create_region_list()
 

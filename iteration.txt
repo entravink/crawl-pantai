@@ -185,12 +185,6 @@ Level 4:
             "name": "AAAAAHA"
         },
         {
-            "id": "043cb58d-1448-425d-8dbb-949a5f7f25dc",
-            "fullCode": "5555SLT55100AAAAZZH",
-            "code": "AAAAZZH",
-            "name": "AAAAZZH"
-        },
-        {
             "id": "0457fa62-c9fa-41b8-9a93-5f3cda699659",
             "fullCode": "5555SLT55100AAAAEEB",
             "code": "AAAAEEB",
@@ -255,6 +249,12 @@ Level 4:
             "fullCode": "5555SLT55100AAAACJG",
             "code": "AAAACJG",
             "name": "AAAACJG"
+        },
+		        {
+            "id": "043cb58d-1448-425d-8dbb-949a5f7f25dc",
+            "fullCode": "5555SLT55100AAAAZZH",
+            "code": "AAAAZZH",
+            "name": "AAAAZZH"
         },
         {
             "id": "071024dc-0fe0-418f-bb9b-f423f3068003",

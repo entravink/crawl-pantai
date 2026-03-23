@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from login import login_with_sso
 from dotenv import load_dotenv
 from sqlalchemy import VARCHAR, DATETIME
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -65,8 +66,31 @@ engine = create_engine(
     pool_recycle=3600
 )
 
-#TABLE_NAME = "assignments"
+#DEFINE TABLE
+DB_COLUMNS = [
+"id","surveyPeriodId","mode","assignmentErrorStatusType",
+"userIdResponsibility","approvedByCreator","codeIdentity",
+"assignmentStatusId","assignmentStatusAlias","isTarikSample",
 
+"data1","data2","data3","data4","data5",
+"data6","data7","data8","data9","data10",
+
+"dateCreated","isActive","sumError","sumRemark","sumClean",
+"done","secondary","longitude","latitude","strata",
+"externalDone","currentUserId","currentUserUsername",
+"currentUserFullname","currentUserSurveyRoleId",
+"currentUserSurveyRoleName","currentUserSurveyRoleIsPencacah",
+"currentUserSurveyRoleCanPullSample","sourceFrom","listing",
+"dateModified","assignmentResponsibility","assignmentResponsibilityAdmin",
+
+"level1_code","level1_name",
+"level2_code","level2_name",
+"level3_code","level3_name",
+"level4_code","level4_name",
+
+"region","regionMetadata","sampleType","isTarget",
+"referencedTo","lockedByUser","lockedByAnother"
+]
 
 # ==============================
 
@@ -171,8 +195,8 @@ def enforce_schema(rows):
 
         r = {}
 
-        for col in header_columns:
-            r[col] = row.get(col,None)
+        for col in DB_COLUMNS:
+            r[col] = row.get(col, None)
 
         fixed.append(r)
 
@@ -195,8 +219,7 @@ def insert_to_db(df):
                 if_exists="append",
                 index=False,
                 chunksize=1000,
-                method="multi",
-                dtype=COLUMN_TYPES
+                method="multi"
             )
 
             return
@@ -216,58 +239,30 @@ def insert_to_db(df):
 
 def append_to_storage(rows):
 
-    global header_written,header_columns
-
     rows = convert_first_level(rows)
+    rows = enforce_schema(rows)
 
+    df = pd.DataFrame(rows, columns=DB_COLUMNS)
+
+    if "dateCreated" in df.columns:
+        df["dateCreated"] = pd.to_datetime(df["dateCreated"], errors="coerce")
+
+    if "dateModified" in df.columns:
+        df["dateModified"] = pd.to_datetime(df["dateModified"], errors="coerce")
+
+    # CSV
     with write_lock:
+        file_exists = os.path.exists(OUTPUT_CSV)
 
-        if not header_written:
+        df.to_csv(
+            OUTPUT_CSV,
+            index=False,
+            mode="a" if file_exists else "w",
+            header=not file_exists
+        )
 
-            df = pd.DataFrame(rows)
-
-            header_columns = list(df.columns)
-
-            if "dateCreated" in df.columns:
-                df["dateCreated"] = pd.to_datetime(df["dateCreated"], errors="coerce")
-
-            if "dateModified" in df.columns:
-                df["dateModified"] = pd.to_datetime(df["dateModified"], errors="coerce")
-
-            df.to_csv(
-                OUTPUT_CSV,
-                index=False,
-                mode="w",
-                header=True
-            )
-
-            df.to_sql(
-                TABLE_NAME,
-                engine,
-                if_exists="replace",
-                index=False,
-                chunksize=1000,
-                method="multi",
-                dtype=COLUMN_TYPES
-            )
-
-            header_written = True
-
-        else:
-
-            rows = enforce_schema(rows)
-
-            df = pd.DataFrame(rows,columns=header_columns)
-
-            df.to_csv(
-                OUTPUT_CSV,
-                index=False,
-                mode="a",
-                header=False
-            )
-
-            insert_to_db(df)
-
+        # ✅ ADD THIS (DB inside lock)
+        insert_to_db(df)
 
 # ==============================
 # REQUEST RETRY
@@ -533,9 +528,28 @@ def test_cookie(headers):
 # MAIN
 # ==============================
 
+
 def main():
 
     global completed_regions
+
+    # ==============================
+    # NEW: Fresh start vs resume
+    # ==============================
+    fresh_start = not os.path.exists(COMPLETED_FILE)
+
+    if fresh_start:
+        print("Fresh start detected → clearing table")
+
+        with engine.begin() as conn:
+            conn.execute(text(f"TRUNCATE TABLE {TABLE_NAME}"))
+
+    else:
+        print("Resume mode → continue scraping")
+
+    # ==============================
+    # COOKIE HANDLING (unchanged)
+    # ==============================
 
     cookies = load_cookie()
 
@@ -577,6 +591,10 @@ def main():
 
         print("Using saved cookie")
 
+    # ==============================
+    # REGION + PROGRESS (unchanged)
+    # ==============================
+
     regions = load_or_create_region_list()
 
     total = len(regions)
@@ -585,6 +603,10 @@ def main():
 
     print("Total region:",total)
     print("Already completed:",len(completed_regions))
+
+    # ==============================
+    # MULTITHREAD SCRAPING (unchanged)
+    # ==============================
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
@@ -605,6 +627,12 @@ def main():
 
     print("Scraping selesai")
 
+    # ==============================
+    # NEW: cleanup completed file
+    # ==============================
+    if os.path.exists(COMPLETED_FILE):
+        os.remove(COMPLETED_FILE)
+        print("completed_regions.txt deleted (all regions finished)")
 
 if __name__ == "__main__":
     main()

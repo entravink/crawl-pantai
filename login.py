@@ -65,7 +65,8 @@ def login_with_sso(username, password, otp_code=None):
 
         sso_button.wait_for(timeout=30000)
 
-        sso_button.click()
+        with page.expect_navigation(timeout=60000):
+            sso_button.click()
 
         # ==============================
         # Wait for Keycloak Login Page
@@ -86,26 +87,34 @@ def login_with_sso(username, password, otp_code=None):
             '#kc-login, input[type="submit"], button[type="submit"]'
         ).first
 
-        submit_btn.click()
+        with page.expect_navigation(timeout=60000):
+            submit_btn.click()
 
         # ==============================
-        # Handle OTP
+        # Handle OTP (more flexible)
         # ==============================
 
         try:
+            page.wait_for_timeout(2000)
 
-            otp_input = page.locator('input[name="otp"], #otp')
+            otp_candidates = page.locator('input')
 
-            if otp_input.is_visible(timeout=5000):
+            if otp_candidates.count() > 0:
+                for i in range(otp_candidates.count()):
+                    field = otp_candidates.nth(i)
+                    name_attr = field.get_attribute("name") or ""
 
-                print("OTP Required detected.")
+                    if any(k in name_attr.lower() for k in ["otp", "totp", "code"]):
+                        print("OTP Required detected.")
 
-                if not otp_code:
-                    otp_code = input("Enter OTP Code: ")
+                        if not otp_code:
+                            otp_code = input("Enter OTP Code: ")
 
-                otp_input.fill(otp_code)
+                        field.fill(otp_code)
+                        page.keyboard.press("Enter")
 
-                page.keyboard.press("Enter")
+                        page.wait_for_load_state("networkidle")
+                        break
 
         except:
             pass
@@ -116,9 +125,30 @@ def login_with_sso(username, password, otp_code=None):
 
         print("Verifying redirection back to App...")
 
-        page.wait_for_url("**fasih-sm.bps.go.id/**", timeout=90000)
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(3000)
 
-        if "fasih-sm.bps.go.id" in page.url and "login" not in page.url.lower():
+        current_url = page.url
+        cookies = context.cookies()
+
+        print("Final URL:", current_url)
+        print("Cookies:", [c["name"] for c in cookies])
+
+        # ==============================
+        # RELAXED SUCCESS CHECK
+        # ==============================
+
+        is_on_domain = "fasih-sm.bps.go.id" in current_url
+        has_cookies = len(cookies) > 0
+
+        # Optional: detect if still on login form
+        login_form_visible = False
+        try:
+            login_form_visible = page.locator('input[name="username"]').is_visible(timeout=3000)
+        except:
+            pass
+
+        if is_on_domain and (has_cookies or not login_form_visible):
 
             print("Login SUCCESSFUL!")
 
@@ -126,7 +156,7 @@ def login_with_sso(username, password, otp_code=None):
 
         else:
 
-            print("Login FAILED. Current URL:", page.url)
+            print("Login FAILED. Current URL:", current_url)
 
             browser.close()
 

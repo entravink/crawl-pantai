@@ -6,6 +6,7 @@ import copy
 import threading
 import json
 import os
+import argparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy import create_engine
@@ -534,21 +535,22 @@ def main():
     global completed_regions
 
     # ==============================
-    # NEW: Fresh start vs resume
+    # ARGUMENTS
     # ==============================
-    fresh_start = not os.path.exists(COMPLETED_FILE)
+    parser = argparse.ArgumentParser()
 
-    if fresh_start:
-        print("Fresh start detected → clearing table")
+    parser.add_argument("user")
+    parser.add_argument("password")
+    parser.add_argument("otp", nargs="?", default=None)
 
-        with engine.begin() as conn:
-            conn.execute(text(f"TRUNCATE TABLE {TABLE_NAME}"))
+    args = parser.parse_args()
 
-    else:
-        print("Resume mode → continue scraping")
+    username = args.user
+    password = args.password
+    otp = args.otp
 
     # ==============================
-    # COOKIE HANDLING (unchanged)
+    # COOKIE HANDLING FIRST
     # ==============================
 
     cookies = load_cookie()
@@ -561,10 +563,6 @@ def main():
             cookies = None
 
     if not cookies:
-
-        username = input("Username: ")
-        password = input("Password: ")
-        otp = input("OTP(optional): ").strip() or None
 
         page,browser = login_with_sso(username,password,otp)
 
@@ -592,7 +590,23 @@ def main():
         print("Using saved cookie")
 
     # ==============================
-    # REGION + PROGRESS (unchanged)
+    # AFTER COOKIE READY:
+    # CHECK FRESH START / RESUME
+    # ==============================
+
+    fresh_start = not os.path.exists(COMPLETED_FILE)
+
+    if fresh_start:
+        print("Fresh start detected → clearing table")
+
+        with engine.begin() as conn:
+            conn.execute(text(f"TRUNCATE TABLE {TABLE_NAME}"))
+
+    else:
+        print("Resume mode → continue scraping")
+
+    # ==============================
+    # REGION + PROGRESS
     # ==============================
 
     regions = load_or_create_region_list()
@@ -605,7 +619,7 @@ def main():
     print("Already completed:",len(completed_regions))
 
     # ==============================
-    # MULTITHREAD SCRAPING (unchanged)
+    # MULTITHREAD SCRAPING
     # ==============================
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -628,8 +642,9 @@ def main():
     print("Scraping selesai")
 
     # ==============================
-    # NEW: cleanup completed file
+    # CLEANUP
     # ==============================
+
     if os.path.exists(COMPLETED_FILE):
         os.remove(COMPLETED_FILE)
         print("completed_regions.txt deleted (all regions finished)")

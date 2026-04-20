@@ -5,6 +5,25 @@ import json
 import requests
 import pandas as pd
 from tqdm import tqdm
+import os
+from sqlalchemy import create_engine
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DBHOST=os.getenv("DBHOST")
+DBUSER=os.getenv("DBUSER")
+DBPASS=os.getenv("DBPASS")
+DBPORT=os.getenv("DBPORT")
+DBNAME=os.getenv("DBNAME")
+
+engine = create_engine(
+    f"mysql+pymysql://{DBUSER}:{DBPASS}@{DBHOST}:{DBPORT}/{DBNAME}",
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600
+)
+
 
 def main():
     try:
@@ -79,6 +98,7 @@ def main():
                                         dt = pd.json_normalize({"region1Id":j['id'],"region1FullCode":j['fullCode'],"region1Name":j['name'],"region1Code":j['code']})
                                         kode_level_1 = j['fullCode']
                                         region_meta['region'+str(reg['id'])]=dt
+                                        dt.to_sql(f"region_list_{reg['id']}", con=engine, if_exists='replace', index=False)
                                         #pilih hanya ['region1Id']
                                         dt = dt[['region1Id']]
                                         dt.to_csv(f"iteration_files/region_list_{reg['id']}.csv",index=False)
@@ -112,6 +132,7 @@ def main():
                                     print(f"Error parsing JSON REGION LEVEL {reg['id']} : {url}")
                                     print(e)
                             dt_all_concat = pd.concat(dt_all, ignore_index=True)
+                            dt_all_concat.to_sql(f"region_list_{reg['id']}", con=engine, if_exists='replace', index=False)
                             # simpan ID saja
                             region_meta[f'region{reg["id"]}'] = dt_all_concat
                             for i in range(1, reg['id']+1):

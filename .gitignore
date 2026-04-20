@@ -12,3 +12,8 @@ ENV/
 # IDEs
 .vscode/
 .idea/
+
+# Iteration files
+iteration_files/*.csv
+
+fasih_cookie.json

@@ -54,6 +54,7 @@ COLUMN_TYPES = {
     "dateCreated": DATETIME(),
     "dateModified": DATETIME()
 }
+DATA_ASSIGNMENT = []
 
 
 # ==============================
@@ -139,7 +140,11 @@ BASE_PAYLOAD = {
 # ==============================
 
 def region_key(region):
-    return f"{region['region1Id']},{region['region2Id']},{region['region3Id']},{region['region4Id']}"
+    reg = ""
+    for key in region.keys():
+        reg = f"{reg},{region[key]}"
+    return reg
+    #return f"{region['region1Id']},{region['region2Id']},{region['region3Id']},{region['region4Id']}"
 
 
 def convert_first_level(rows):
@@ -207,6 +212,9 @@ def enforce_schema(rows):
 # ==============================
 # SAFE DB INSERT
 # ==============================
+def insert_to_array(df):
+    global DATA_ASSIGNMENT
+    DATA_ASSIGNMENT.append(df)
 
 def insert_to_db(df):
 
@@ -217,7 +225,7 @@ def insert_to_db(df):
             df.to_sql(
                 TABLE_NAME,
                 engine,
-                if_exists="append",
+                if_exists="replace",
                 index=False,
                 chunksize=1000,
                 method="multi"
@@ -263,7 +271,8 @@ def append_to_storage(rows):
         )
 
         # ✅ ADD THIS (DB inside lock)
-        insert_to_db(df)
+        insert_to_array(df)
+        #insert_to_db(df)
 
 # ==============================
 # REQUEST RETRY
@@ -627,7 +636,7 @@ def main():
         futures = []
 
         for i,r in enumerate(regions,1):
-
+            print(r)
             futures.append(
                 executor.submit(scrape_region,r,i,total,headers)
             )
@@ -640,6 +649,12 @@ def main():
                 print("Region error:",e)
 
     print("Scraping selesai")
+
+    # ==============================
+    # WRITE TO DB (AFTER ALL SCRAPING DONE)
+    # ==============================
+    dt_all = pd.concat(DATA_ASSIGNMENT, ignore_index=True)
+    insert_to_db(dt_all)
 
     # ==============================
     # CLEANUP

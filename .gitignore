@@ -17,3 +17,5 @@ ENV/
 iteration_files/*.csv
 
 fasih_cookie.json
+fasih_data.csv
+region_list.csv

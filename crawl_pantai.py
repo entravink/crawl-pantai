@@ -7,7 +7,6 @@ import threading
 import json
 import os
 import argparse
-import random
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy import create_engine
@@ -34,10 +33,11 @@ OUTPUT_CSV = "fasih_data.csv"
 COMPLETED_FILE = "completed_regions.txt"
 
 COOKIE_FILE = "fasih_cookie.json"
+
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 PAGE_SIZE = 1000
-MAX_WORKERS = 3
+MAX_WORKERS = 8
 MAX_RETRIES = 5
 
 BASE_DELAY = 0.7
@@ -98,7 +98,7 @@ DB_COLUMNS = [
 
 # ==============================
 
-
+session = requests.Session()
 
 write_lock = threading.Lock()
 progress_lock = threading.Lock()
@@ -108,10 +108,6 @@ header_columns = None
 
 completed_regions = set()
 progress_count = 0
-
-last_request_time = 0
-rate_lock = threading.Lock()
-MIN_INTERVAL = 0.5  # seconds
 
 
 # ==============================
@@ -127,7 +123,7 @@ BASE_PAYLOAD = {
         {"data":"data2"},
         {"data":"data3"},
         {"data":"data4"},
-        {"data":"data5"},
+        {"data":"data5"}
     ],
     "order":[{"column":0,"dir":"asc"}],
     "start":0,
@@ -145,13 +141,6 @@ BASE_PAYLOAD = {
 # UTILITIES
 # ==============================
 
-thread_local = threading.local()
-
-def get_session():
-    if not hasattr(thread_local, "session"):
-        thread_local.session = requests.Session()
-    return thread_local.session
-
 def region_key(region):
     reg = ""
     for key in region.keys():
@@ -159,7 +148,6 @@ def region_key(region):
     return reg
     #return f"{region['region1Id']},{region['region2Id']},{region['region3Id']},{region['region4Id']}"
 
-    return ",".join(str(region[k]) for k in keys if pd.notna(region[k]) and region[k] != "")
 
 def convert_first_level(rows):
 
@@ -222,17 +210,6 @@ def enforce_schema(rows):
 
     return fixed
 
-def extract_region_ids(region):
-    """
-    Keep ONLY regionXId and ignore null/empty
-    """
-    result = {}
-
-    for k, v in region.items():
-        if re.fullmatch(r"region\d+Id", k) and pd.notna(v) and v != "":
-            result[k] = v
-
-    return result
 
 # ==============================
 # SAFE DB INSERT
@@ -303,24 +280,12 @@ def append_to_storage(rows):
 # REQUEST RETRY
 # ==============================
 
-def request_with_retry(url, payload, headers):
+def request_with_retry(url,payload,headers):
 
-    global last_request_time
-
-    session = get_session()  # assuming you added thread-local session
-
-    for attempt in range(1, MAX_RETRIES + 1):
+    for attempt in range(1,MAX_RETRIES+1):
 
         try:
-            # ✅ GLOBAL RATE LIMIT HERE
-            with rate_lock:
-                now = time.time()
-                wait = MIN_INTERVAL - (now - last_request_time)
-                if wait > 0:
-                    time.sleep(wait)
-                last_request_time = time.time()
 
-            # ✅ ACTUAL REQUEST
             r = session.post(
                 url,
                 json=payload,
@@ -334,12 +299,13 @@ def request_with_retry(url, payload, headers):
 
         except Exception as e:
 
-            print(f"Retry {attempt}/{MAX_RETRIES}", e)
+            print(f"Retry {attempt}/{MAX_RETRIES}",e)
 
             if attempt == MAX_RETRIES:
                 raise
 
-            time.sleep(RETRY_DELAY * attempt)
+            time.sleep(RETRY_DELAY)
+
 
 # ==============================
 # REGION PARSER
@@ -413,11 +379,9 @@ def load_or_create_region_list():
 
         print("Loading region list from CSV...")
 
-        df = pd.read_csv(REGION_LIST_FILE, dtype=str)
+        df = pd.read_csv(REGION_LIST_FILE)
 
-        region_cols = [col for col in df.columns if re.fullmatch(r"region\d+Id", col)]
-
-        regions = df[region_cols].to_dict(orient="records")
+        regions = df.to_dict(orient="records")
 
         return regions
 
@@ -478,12 +442,7 @@ def scrape_region(region,index,total,headers):
         payload["start"] = start_row
         payload["draw"] = draw
 
-        payload["assignmentExtraParam"] = {
-            "surveyPeriodId": SURVEY_PERIOD_ID,
-            "assignmentErrorStatusType": -1,
-            "filterTargetType": "TARGET_ONLY",
-            **extract_region_ids(region)
-        }
+        payload["assignmentExtraParam"].update(region)
 
         res = request_with_retry(BASE_URL,payload,headers)
 
@@ -499,7 +458,7 @@ def scrape_region(region,index,total,headers):
         start_row += PAGE_SIZE
         draw += 1
 
-        time.sleep(BASE_DELAY + random.uniform(0.3, 1.2))
+        time.sleep(BASE_DELAY)
 
     save_completed(key)
 

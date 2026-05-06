@@ -56,6 +56,7 @@ COLUMN_TYPES = {
     "dateCreated": DATETIME(),
     "dateModified": DATETIME()
 }
+DATA_ASSIGNMENT = []
 
 
 # ==============================
@@ -152,10 +153,11 @@ def get_session():
     return thread_local.session
 
 def region_key(region):
-    keys = sorted(
-        [k for k in region.keys() if re.fullmatch(r"region\d+Id", k)],
-        key=lambda x: int(re.findall(r"\d+", x)[0])
-    )
+    reg = ""
+    for key in region.keys():
+        reg = f"{reg},{region[key]}"
+    return reg
+    #return f"{region['region1Id']},{region['region2Id']},{region['region3Id']},{region['region4Id']}"
 
     return ",".join(str(region[k]) for k in keys if pd.notna(region[k]) and region[k] != "")
 
@@ -235,6 +237,9 @@ def extract_region_ids(region):
 # ==============================
 # SAFE DB INSERT
 # ==============================
+def insert_to_array(df):
+    global DATA_ASSIGNMENT
+    DATA_ASSIGNMENT.append(df)
 
 def insert_to_db(df):
 
@@ -245,7 +250,7 @@ def insert_to_db(df):
             df.to_sql(
                 TABLE_NAME,
                 engine,
-                if_exists="append",
+                if_exists="replace",
                 index=False,
                 chunksize=1000,
                 method="multi"
@@ -291,7 +296,8 @@ def append_to_storage(rows):
         )
 
         # ✅ ADD THIS (DB inside lock)
-        insert_to_db(df)
+        insert_to_array(df)
+        #insert_to_db(df)
 
 # ==============================
 # REQUEST RETRY
@@ -686,7 +692,7 @@ def main():
         futures = []
 
         for i,r in enumerate(regions,1):
-
+            print(r)
             futures.append(
                 executor.submit(scrape_region,r,i,total,headers)
             )
@@ -699,6 +705,12 @@ def main():
                 print("Region error:",e)
 
     print("Scraping selesai")
+
+    # ==============================
+    # WRITE TO DB (AFTER ALL SCRAPING DONE)
+    # ==============================
+    dt_all = pd.concat(DATA_ASSIGNMENT, ignore_index=True)
+    insert_to_db(dt_all)
 
     # ==============================
     # CLEANUP

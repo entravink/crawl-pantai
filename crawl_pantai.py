@@ -7,6 +7,7 @@ import threading
 import json
 import os
 import argparse
+import random
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy import create_engine
@@ -33,9 +34,10 @@ OUTPUT_CSV = "fasih_data.csv"
 COMPLETED_FILE = "completed_regions.txt"
 
 COOKIE_FILE = "fasih_cookie.json"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 PAGE_SIZE = 1000
-MAX_WORKERS = 8
+MAX_WORKERS = 3
 MAX_RETRIES = 5
 
 BASE_DELAY = 0.7
@@ -95,7 +97,7 @@ DB_COLUMNS = [
 
 # ==============================
 
-session = requests.Session()
+
 
 write_lock = threading.Lock()
 progress_lock = threading.Lock()
@@ -105,6 +107,10 @@ header_columns = None
 
 completed_regions = set()
 progress_count = 0
+
+last_request_time = 0
+rate_lock = threading.Lock()
+MIN_INTERVAL = 0.5  # seconds
 
 
 # ==============================
@@ -120,7 +126,7 @@ BASE_PAYLOAD = {
         {"data":"data2"},
         {"data":"data3"},
         {"data":"data4"},
-        {"data":"data5"}
+        {"data":"data5"},
     ],
     "order":[{"column":0,"dir":"asc"}],
     "start":0,
@@ -138,9 +144,20 @@ BASE_PAYLOAD = {
 # UTILITIES
 # ==============================
 
-def region_key(region):
-    return f"{region['region1Id']},{region['region2Id']},{region['region3Id']},{region['region4Id']}"
+thread_local = threading.local()
 
+def get_session():
+    if not hasattr(thread_local, "session"):
+        thread_local.session = requests.Session()
+    return thread_local.session
+
+def region_key(region):
+    keys = sorted(
+        [k for k in region.keys() if re.fullmatch(r"region\d+Id", k)],
+        key=lambda x: int(re.findall(r"\d+", x)[0])
+    )
+
+    return ",".join(str(region[k]) for k in keys if pd.notna(region[k]) and region[k] != "")
 
 def convert_first_level(rows):
 
@@ -203,6 +220,17 @@ def enforce_schema(rows):
 
     return fixed
 
+def extract_region_ids(region):
+    """
+    Keep ONLY regionXId and ignore null/empty
+    """
+    result = {}
+
+    for k, v in region.items():
+        if re.fullmatch(r"region\d+Id", k) and pd.notna(v) and v != "":
+            result[k] = v
+
+    return result
 
 # ==============================
 # SAFE DB INSERT
@@ -269,12 +297,24 @@ def append_to_storage(rows):
 # REQUEST RETRY
 # ==============================
 
-def request_with_retry(url,payload,headers):
+def request_with_retry(url, payload, headers):
 
-    for attempt in range(1,MAX_RETRIES+1):
+    global last_request_time
+
+    session = get_session()  # assuming you added thread-local session
+
+    for attempt in range(1, MAX_RETRIES + 1):
 
         try:
+            # ✅ GLOBAL RATE LIMIT HERE
+            with rate_lock:
+                now = time.time()
+                wait = MIN_INTERVAL - (now - last_request_time)
+                if wait > 0:
+                    time.sleep(wait)
+                last_request_time = time.time()
 
+            # ✅ ACTUAL REQUEST
             r = session.post(
                 url,
                 json=payload,
@@ -288,13 +328,12 @@ def request_with_retry(url,payload,headers):
 
         except Exception as e:
 
-            print(f"Retry {attempt}/{MAX_RETRIES}",e)
+            print(f"Retry {attempt}/{MAX_RETRIES}", e)
 
             if attempt == MAX_RETRIES:
                 raise
 
-            time.sleep(RETRY_DELAY)
-
+            time.sleep(RETRY_DELAY * attempt)
 
 # ==============================
 # REGION PARSER
@@ -368,9 +407,11 @@ def load_or_create_region_list():
 
         print("Loading region list from CSV...")
 
-        df = pd.read_csv(REGION_LIST_FILE)
+        df = pd.read_csv(REGION_LIST_FILE, dtype=str)
 
-        regions = df.to_dict(orient="records")
+        region_cols = [col for col in df.columns if re.fullmatch(r"region\d+Id", col)]
+
+        regions = df[region_cols].to_dict(orient="records")
 
         return regions
 
@@ -431,7 +472,12 @@ def scrape_region(region,index,total,headers):
         payload["start"] = start_row
         payload["draw"] = draw
 
-        payload["assignmentExtraParam"].update(region)
+        payload["assignmentExtraParam"] = {
+            "surveyPeriodId": SURVEY_PERIOD_ID,
+            "assignmentErrorStatusType": -1,
+            "filterTargetType": "TARGET_ONLY",
+            **extract_region_ids(region)
+        }
 
         res = request_with_retry(BASE_URL,payload,headers)
 
@@ -447,7 +493,7 @@ def scrape_region(region,index,total,headers):
         start_row += PAGE_SIZE
         draw += 1
 
-        time.sleep(BASE_DELAY)
+        time.sleep(BASE_DELAY + random.uniform(0.3, 1.2))
 
     save_completed(key)
 
@@ -488,14 +534,27 @@ def cookie_to_header(cookies):
     xsrf_token = next((c['value'] for c in cookies if c['name']=="XSRF-TOKEN"),None)
 
     headers = {
-        "Accept":"application/json",
-        "Content-Type":"application/json",
-        "User-Agent":"Mozilla/5.0",
-        "X-XSRF-TOKEN":xsrf_token.replace('%3D','=') if xsrf_token else "",
-        "Cookie":cookie_string,
-        "Origin":"https://fasih-sm.bps.go.id",
-        "Referer":"https://fasih-sm.bps.go.id/"
-    }
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+
+    "User-Agent": USER_AGENT,
+
+    "Referer": "https://fasih-sm.bps.go.id/",
+    "Origin": "https://fasih-sm.bps.go.id",
+
+    "X-Requested-With": "XMLHttpRequest",
+
+    # 🔥 VERY IMPORTANT
+    "sec-ch-ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+
+    "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+    "Connection": "keep-alive",
+
+    "X-XSRF-TOKEN": xsrf_token.replace('%3D','=') if xsrf_token else "",
+    "Cookie": cookie_string
+}
 
     return headers
 
